@@ -1,0 +1,763 @@
+---
+title: "ECNM Research project"
+author: "Bryan Calderon"
+format: html
+editor: visual
+---
+
+## Bringing in the data & Load Packages
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+packages <- c("tidyverse", 
+              "stargazer",
+              "knitr",
+              "kableExtra",
+              "visdat",
+              "readr",
+              "scales",
+              "psych",
+              "moments",
+              "reshape2",
+              "visdat",
+              "missForest",
+              "dplyr",
+              "corrplot",
+              "RColorBrewer",
+              "ggcorrplot",
+              "broom",
+              "gridExtra",
+              "car",
+              "gridExtra",
+              "e1071",
+              "pROC",
+              "caret",
+              "glmnet")
+
+
+# Loop through the packages
+for (package in packages) {
+  if (!package %in% rownames(installed.packages())) {
+    install.packages(package, repos = "http://cran.rstudio.com/", dependencies = TRUE)
+  }
+  library(package, character.only = TRUE)}
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Set working directory
+setwd("~/Desktop/Grad School/Econometrics/Final Project/data")
+
+# Read the data (ensure the correct file type)
+# Example for a shapefile
+nj_dt <- read.csv("New Jersey Data Final.csv")
+```
+
+## Graphs and charts
+
+#### Filtering data to only include greater than \$50K and less than \$2MM.
+
+```{r}
+# Filter data
+nj_dt3 <- nj_dt[nj_dt$Sale_Range == 1, ]
+```
+
+#### Distribution Graph - Before and after clean up
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Load necessary library
+library(ggplot2)
+
+# Distribution plot
+p1 <- ggplot(nj_dt, aes(x = sale_assessment)) +
+  geom_histogram(binwidth = 5000, fill = "skyblue", color = "blue", alpha = 0.7) +
+  labs(
+    title = "Distribution of Assessment Value - Pre Cleaning",
+    x = "Sale Asessment",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+p2 <- ggplot(nj_dt3, aes(x = sale_assessment)) +
+  geom_histogram(binwidth = 5000, fill = "skyblue", color = "blue", alpha = 0.7) +
+  labs(
+    title = "Distribution of Assessment Value - Post Cleaning",
+    x = "Sale Assessment",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+grid.arrange(p1, p2, nrow = 2)
+```
+
+## Graphing the Diff in Diff: All dates
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+
+# Ensure Quarter is treated as an ordered factor
+nj_dt3$Quarter <- factor(nj_dt3$Quarter, 
+                         levels = sort(unique(nj_dt3$Quarter)), ordered = TRUE)
+
+# Filter and prepare data
+selected_counties <- nj_dt3 %>%
+  filter(county_name %in% c("ATLANTIC", "SUSSEX")) %>%
+  mutate(group = ifelse(county_name == "SUSSEX", "More Impacted", "Less Impacted"))
+
+# Aggregate data
+avg_value_price <- selected_counties %>%
+  group_by(Quarter, group) %>%
+  summarize(avg_value = mean(sale_assessment, na.rm = TRUE), .groups = 'drop')
+
+# Plot the data
+ggplot(avg_value_price, aes(x = Quarter, y = avg_value, color = group, group = group)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  geom_vline(
+    xintercept = which(levels(as.factor(avg_value_price$Quarter)) == "2012-Q4"), 
+    color = "red", linetype = "dashed", size = 1
+  ) +
+  labs(
+    title = "Difference-in-Differences: Impact of Hurricane Sandy",
+    x = "Quarter",
+    y = "Average Assessment Value",
+    color = "Group"
+  ) +
+  scale_color_manual(
+    values = c("More Impacted" = "blue", "Less Impacted" = "orange"),
+    labels = c("Atlantic (More Impacted)", "SUSSEX (Less Impacted)")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
+  )
+
+
+```
+
+## Graphing the Diff in Diff: 2012-2014 to highlight second dip
+
+```{r}
+# Ensure Quarter is treated as an ordered factor
+nj_dt3$Quarter <- factor(nj_dt3$Quarter, 
+                         levels = sort(unique(nj_dt3$Quarter)), ordered = TRUE)
+
+# Filter and prepare data for selected years and counties
+selected_counties <- nj_dt3 %>%
+  filter(county_name %in% c("ATLANTIC", "SUSSEX")) %>%
+  mutate(group = ifelse(county_name == "SUSSEX", "More Impacted", "Less Impacted"))
+
+# Aggregate data
+avg_value_price <- selected_counties %>%
+  group_by(Quarter, group) %>%
+  summarize(avg_value = mean(sale_assessment, na.rm = TRUE), .groups = 'drop')
+
+# Plot the data
+ggplot(avg_value_price, aes(x = Quarter, y = avg_value, color = group, group = group)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+geom_vline(
+  xintercept = match("2012-Q4", levels(avg_value_price$Quarter)), 
+  color = "red", linetype = "dashed", size = 1
+)+
+  geom_vline(
+  xintercept = match("2014-Q1", levels(avg_value_price$Quarter)), 
+  color = "blue", linetype = "dashed", size = 1
+)+
+  labs(
+    title = "Difference-in-Differences: Impact of Hurricane Sandy",
+    x = "Quarter",
+    y = "Average Assessment Value",
+    color = "Group"
+  ) +
+  scale_color_manual(
+    values = c("More Impacted" = "blue", "Less Impacted" = "orange"),
+    labels = c("Atlantic (More Impacted)", "SUSSEX (Less Impacted)")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top"
+  )
+
+```
+
+## Diff in Diff Model
+
+```{r}
+
+# Renaming variable
+names(nj_dt3)[names(nj_dt3) == "interactive"] <- "Interaction"
+names(nj_dt3)[names(nj_dt3) == "Treated"] <- "Intensity_of_teatment"
+
+# Running DiD regression
+did_model <- lm(sale_assessment ~ Intensity_of_teatment + Time + Interaction, 
+                data = nj_dt3)
+
+# Summarize
+stargazer(did_model,
+          type = "text")
+```
+
+## Diff in Diff Placebo Model: Falsification test
+
+```{r}
+
+# Run the DiD regression
+did_model2 <- lm(sale_assessment ~ Intensity_of_teatment + Time_Placebo + Interaction_Placebo, 
+                data = nj_dt3)
+
+# Summarize the results
+stargazer(did_model2,
+          type = "text")
+```
+
+# Langley Additions
+
+# Loading Data
+
+```{r}
+nj_data <- nj_dt
+
+nj_data_filt <- nj_dt3
+```
+
+# EDA
+
+# Raw Data Summary Stats - SWITCH to have just the original columns !
+
+```{r}
+stargazer(nj_data, type = "text")
+```
+
+# Cleaned Data EDA
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+
+# Assuming your data frame has a 'County' column
+ggplot(nj_data_filt, aes(x = county_name)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Count of Observations by County", x = "County", y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+library(e1071)
+
+colnames(nj_data_filt)[colnames(nj_data_filt) == "county_name"] <- "CountyName"
+
+summary_table <- nj_data_filt %>%
+  group_by(CountyName) %>%
+  summarise(
+    Mean = mean(sale_assessment, na.rm = TRUE),
+    Median = median(sale_assessment, na.rm = TRUE),
+    SD = sd(sale_assessment, na.rm = TRUE),
+    Min = min(sale_assessment, na.rm = TRUE),
+    Max = max(sale_assessment, na.rm = TRUE),
+    Skew = skewness(sale_assessment, na.rm = TRUE)  # Adding skewness
+)
+
+```
+
+```{r}
+library(e1071)
+
+colnames(nj_data)[colnames(nj_data) == "county_name"] <- "CountyName"
+
+summary_table2 <- nj_data %>%
+  group_by(CountyName) %>%
+  summarise(
+    Mean = mean(sale_assessment, na.rm = TRUE),
+    Median = median(sale_assessment, na.rm = TRUE),
+    SD = sd(sale_assessment, na.rm = TRUE),
+    Min = min(sale_assessment, na.rm = TRUE),
+    Max = max(sale_assessment, na.rm = TRUE),
+    Skew = skewness(sale_assessment, na.rm = TRUE)  # Adding skewness
+)
+```
+
+```{r}
+nj_dt_table <- nj_data[, c("sale_assessment"), drop = FALSE]
+
+colnames(nj_dt_table) <- c("SaleAssessment")
+
+
+# Filter only the numeric columns from the dataset
+numeric_data <- nj_dt_table %>% select_if(is.numeric)
+
+# Function to create summary statistics
+nj_summary_stats <- function(x) {
+  c(mean = mean(x, na.rm = TRUE),
+    median = median(x, na.rm = TRUE),
+    minimum = min(x, na.rm = TRUE),
+    maximum = max(x, na.rm = TRUE),
+    skew = skewness(x, na.rm = TRUE),
+    sd = sd(x, na.rm = TRUE))
+}
+
+# Apply the function to each numeric variable in the dataset
+nj_summary_table <- sapply(numeric_data, nj_summary_stats)
+
+# Convert the matrix to a data frame and transpose it
+nj_summary_table_df <- as.data.frame(t(nj_summary_table))
+
+# Round and format the numeric columns with commas
+nj_summary_table_df$mean <- comma(round(nj_summary_table_df$mean, digits = 0))
+nj_summary_table_df$median <- comma(round(nj_summary_table_df$median, digits = 0))
+nj_summary_table_df$minimum <- comma(round(nj_summary_table_df$minimum, digits = 0))
+nj_summary_table_df$maximum <- comma(round(nj_summary_table_df$maximum, digits = 0))
+nj_summary_table_df$sd <- comma(round(nj_summary_table_df$sd, digits = 2))
+
+nj_summary_table_df$skew <- round(nj_summary_table_df$skew, digits = 2)
+
+# Print the summary table
+kable(nj_summary_table_df, 
+      col.names = c("Mean", "Median", "Minimum", "Maximum", "Skew", "SD"), 
+      caption = "Summary of Sale Assessment Value for New Jersey - Pre Clean") %>% kable_styling("striped") 
+
+```
+
+```{r}
+nj_data_filt_table <- nj_data_filt[, c("sale_assessment"), drop = FALSE]
+
+colnames(nj_data_filt_table) <- c("SaleAssessment")
+
+
+# Filter only the numeric columns from the dataset
+numeric_data3 <- nj_data_filt_table %>% select_if(is.numeric)
+
+# Function to create summary statistics
+nj_summary_stats3 <- function(x) {
+  c(mean = mean(x, na.rm = TRUE),
+    median = median(x, na.rm = TRUE),
+    minimum = min(x, na.rm = TRUE),
+    maximum = max(x, na.rm = TRUE),
+    skew = skewness(x, na.rm = TRUE),
+    sd = sd(x, na.rm = TRUE))
+}
+
+# Apply the function to each numeric variable in the dataset
+nj_summary_table3 <- sapply(numeric_data3, nj_summary_stats3)
+
+# Convert the matrix to a data frame and transpose it
+nj_summary_table_df3 <- as.data.frame(t(nj_summary_table3))
+
+# Round and format the numeric columns with commas
+nj_summary_table_df3$mean <- comma(round(nj_summary_table_df3$mean, digits = 0))
+nj_summary_table_df3$median <- comma(round(nj_summary_table_df3$median, digits = 0))
+nj_summary_table_df3$minimum <- comma(round(nj_summary_table_df3$minimum, digits = 0))
+nj_summary_table_df3$maximum <- comma(round(nj_summary_table_df3$maximum, digits = 0))
+nj_summary_table_df3$sd <- comma(round(nj_summary_table_df3$sd, digits = 2))
+
+nj_summary_table_df3$skew <- round(nj_summary_table_df3$skew, digits = 2)
+
+# Print the summary table
+kable(nj_summary_table_df3, 
+      col.names = c("Mean", "Median", "Minimum", "Maximum", "Skew", "SD"), 
+      caption = "Summary of Sale Assessment Value for New Jersey - Post Clean") %>% kable_styling("striped") 
+
+```
+
+nj_summary_table_df3 - Post
+
+nj_summary_table_df- Pre
+
+# Creating a Merged Comparison Table
+
+```{r}
+# Add an indicator column
+summary_before <- nj_summary_table_df %>% mutate(Capping = "Pre")
+summary_after <- nj_summary_table_df3 %>% mutate(Capping = "Post")
+
+# Combine the two tables
+merged_summary <- bind_rows(summary_before, summary_after)
+
+# Remove the "Capping" column
+merged_summary <- subset(merged_summary, select = -Capping)
+
+
+# Assign row names
+rownames(merged_summary) <- c("SaleAssessmentPre", "SaleAssessmentPost")
+
+colnames(merged_summary) <- c("Mean", "Median", "Minimum", "Maximum","Skew","SD")
+
+kable(merged_summary, caption= "Sale Assessment Summary Stats Before and After Capping") %>% kable_styling("striped")
+
+```
+
+# INITIAL SUMMARY STATS - With original columns - FIX
+
+```{r}
+# Subset the dataset for specific columns by name
+subset_data <- nj_data[, c("Year", "sale_assessment", "residential")]
+
+colnames(subset_data) <- c("Year", "SaleAssessment", "Residential")
+
+stargazer(subset_data, type = "text")
+
+```
+
+# Switch to Balance Test
+
+# Balance Table With 2010 and 2011
+
+```{r}
+library(reader)
+balance_data <- read.csv("/Users/langleyburke/Downloads/New Balance - Sheet1.csv", header = TRUE, stringsAsFactors = FALSE)
+```
+
+```{r}
+balance_data <- balance_data[, -ncol(balance_data)]
+```
+
+```{r}
+# New values to add as a column
+median_assessment_val <- c(315000, 283700, 318800, 271150)
+
+# Add the new column to the dataset
+balance_data$Median_assessment <- median_assessment_val
+
+# Print the updated dataset
+print(balance_data)
+
+```
+
+```{r}
+colnames(balance_data) <- c("Time", "Treatment", "PopulationDensity", "Male","Female","MedianAge","CollegeDegree","HouseholdIncome","UnemploymentRate","HouseSize","OwenedHomes","MarriedFamilyOwners","AssessmentValue")
+```
+
+```{r}
+str(balance_data)
+```
+
+```{r}
+balancecovs<- subset(x = balance_data,
+               select = -c(Treatment)
+               )
+```
+
+```{r}
+library(cobalt)
+balance_table <- bal.tab(x = balancecovs, 
+        treat = balance_data$Treatment)
+
+print(balance_table)
+```
+
+```{r}
+library(modelsummary)
+datasummary_balance(formula = ~ Treatment, 
+                    data=balance_data
+                    )
+```
+
+# Calculating P Values For Significance
+
+```{r}
+# Run t-tests with updated column names
+p1 <- t.test(PopulationDensity ~ Treatment, data = balance_data)
+p2 <- t.test(Male ~ Treatment, data = balance_data)
+p3 <- t.test(Female ~ Treatment, data = balance_data)
+p4 <- t.test(MedianAge ~ Treatment, data = balance_data)
+p5 <- t.test(CollegeDegree ~ Treatment, data = balance_data)
+p6 <- t.test(HouseholdIncome ~ Treatment, data = balance_data)
+p7 <- t.test(UnemploymentRate ~ Treatment, data = balance_data)
+p8 <- t.test(HouseSize ~ Treatment, data = balance_data)
+p9 <- t.test(OwenedHomes ~ Treatment, data = balance_data)
+p10 <- t.test(MarriedFamilyOwners ~ Treatment, data = balance_data)
+p11 <- t.test(AssessmentValue ~ Treatment, data = balance_data)
+
+```
+
+## Combining to Create Final Balance Table
+
+```{r}
+
+# Combine t-test results into a data frame with updated column names
+results <- data.frame(
+  Variable = c("PopulationDensity", "Male", "Female", "MedianAge", 
+               "CollegeDegree", "HouseholdIncome",
+               "UnemploymentRate", "HouseSize", 
+               "OwenedHomes", "MarriedFamilyOwners",
+               "AssessmentValue"),  # Add the new variable here
+  Mean_0 = c(mean(balance_data$PopulationDensity[balance_data$Treatment == 0]), 
+             mean(balance_data$Male[balance_data$Treatment == 0]), 
+             mean(balance_data$Female[balance_data$Treatment == 0]), 
+             mean(balance_data$MedianAge[balance_data$Treatment == 0]),
+             mean(balance_data$CollegeDegree[balance_data$Treatment == 0]), 
+             mean(balance_data$HouseholdIncome[balance_data$Treatment == 0]), 
+             mean(balance_data$UnemploymentRate[balance_data$Treatment == 0]), 
+             mean(balance_data$HouseSize[balance_data$Treatment == 0]), 
+             mean(balance_data$OwenedHomes[balance_data$Treatment == 0]), 
+             mean(balance_data$MarriedFamilyOwners[balance_data$Treatment == 0]),
+             mean(balance_data$AssessmentValue[balance_data$Treatment == 0])),  # Add the new mean
+  Mean_1 = c(mean(balance_data$PopulationDensity[balance_data$Treatment == 1]), 
+             mean(balance_data$Male[balance_data$Treatment == 1]), 
+             mean(balance_data$Female[balance_data$Treatment == 1]), 
+             mean(balance_data$MedianAge[balance_data$Treatment == 1]),
+             mean(balance_data$CollegeDegree[balance_data$Treatment == 1]), 
+             mean(balance_data$HouseholdIncome[balance_data$Treatment == 1]), 
+             mean(balance_data$UnemploymentRate[balance_data$Treatment == 1]), 
+             mean(balance_data$HouseSize[balance_data$Treatment == 1]), 
+             mean(balance_data$OwenedHomes[balance_data$Treatment == 1]), 
+             mean(balance_data$MarriedFamilyOwners[balance_data$Treatment == 1]),
+             mean(balance_data$AssessmentValue[balance_data$Treatment == 1])),  # Add the new mean
+  SD_0 = c(sd(balance_data$PopulationDensity[balance_data$Treatment == 0]), 
+           sd(balance_data$Male[balance_data$Treatment == 0]), 
+           sd(balance_data$Female[balance_data$Treatment == 0]), 
+           sd(balance_data$MedianAge[balance_data$Treatment == 0]),
+           sd(balance_data$CollegeDegree[balance_data$Treatment == 0]), 
+           sd(balance_data$HouseholdIncome[balance_data$Treatment == 0]), 
+           sd(balance_data$UnemploymentRate[balance_data$Treatment == 0]), 
+           sd(balance_data$HouseSize[balance_data$Treatment == 0]), 
+           sd(balance_data$OwenedHomes[balance_data$Treatment == 0]), 
+           sd(balance_data$MarriedFamilyOwners[balance_data$Treatment == 0]),
+           sd(balance_data$AssessmentValue[balance_data$Treatment == 0])),  # Add the new SD
+  SD_1 = c(sd(balance_data$PopulationDensity[balance_data$Treatment == 1]), 
+           sd(balance_data$Male[balance_data$Treatment == 1]), 
+           sd(balance_data$Female[balance_data$Treatment == 1]), 
+           sd(balance_data$MedianAge[balance_data$Treatment == 1]),
+           sd(balance_data$CollegeDegree[balance_data$Treatment == 1]), 
+           sd(balance_data$HouseholdIncome[balance_data$Treatment == 1]), 
+           sd(balance_data$UnemploymentRate[balance_data$Treatment == 1]), 
+           sd(balance_data$HouseSize[balance_data$Treatment == 1]), 
+           sd(balance_data$OwenedHomes[balance_data$Treatment == 1]), 
+           sd(balance_data$MarriedFamilyOwners[balance_data$Treatment == 1]),
+           sd(balance_data$AssessmentValue[balance_data$Treatment == 1])),  # Add the new SD
+  Diff_Means = c(p1$estimate[1] - p1$estimate[2], p2$estimate[1] - p2$estimate[2], 
+                 p3$estimate[1] - p3$estimate[2], p4$estimate[1] - p4$estimate[2],
+                 p5$estimate[1] - p5$estimate[2], p6$estimate[1] - p6$estimate[2], 
+                 p7$estimate[1] - p7$estimate[2], p8$estimate[1] - p8$estimate[2], 
+                 p9$estimate[1] - p9$estimate[2], p10$estimate[1] - p10$estimate[2],
+                 p11$estimate[1] - p11$estimate[2]),  # Add the new diff
+  P_Value = c(p1$p.value, p2$p.value, p3$p.value, p4$p.value, p5$p.value, p6$p.value, 
+              p7$p.value, p8$p.value, p9$p.value, p10$p.value, p11$p.value)
+)
+
+
+# Display the table using kable
+library(knitr)
+kable(results, caption = "T-Test Results: P-Values for Demographics by Treatment Group")
+
+# View the results table
+print(results)
+
+```
+
+# Kable Table for Report
+
+```{r}
+library(kableExtra)
+library(knitr)
+
+# Modify column names for the kable table
+colnames(results) <- c("Variable", "Mean (Sussex)", "Mean  (Atlantic)", 
+                       "SD (Sussex)", "SD   (Atlantic)", "Difference in Means", 
+                       "P-Value")
+
+kable(results, caption = "Balance Table", digits = 2) %>% kable_styling("striped") %>%
+    row_spec(11, color = "blue") 
+```
+
+Findings:
+
+-   **Significant differences** (p \< 0.05) were found for **Population.density**, **Median.household.income**, suggesting that these variables are imbalanced between the treatment and control groups before the hurricane.
+
+-   **No significant differences** were found for other variables like **Male**, **Female**, **Median.age**, **Unemployment.rate**, etc., suggesting that these variables are balanced between the groups before the hurricane.
+
+# Demographic Data Table - For Report
+
+```{r}
+transposed_data <- t(balance_data)
+
+transposed_data <- as.data.frame(t(balance_data))
+```
+
+```{r}
+colnames(transposed_data) <- c("Atlantic - 2010", "Sussex - 2010", "Atlantic - 2011", "Sussex - 2011")
+
+# Remove the first two rows
+transposed_data <- transposed_data[-c(1, 2), ]
+
+```
+
+```{r}
+kable(transposed_data, caption= "Demographics Across Groups - Pre Hurricane Sandy")  %>% kable_styling("striped")
+```
+
+# Event Study - Aritra Addition
+
+```{r}
+nj_dt <- nj_dt[nj_dt$Sale_Range == 1, ]
+```
+
+```{r}
+head(nj_dt)
+```
+
+```{r}
+nj_dt2 <- nj_dt %>%
+  mutate(
+    Quarter = as.character(Quarter),  # Ensure Quarter is a character
+    year = as.numeric(sapply(strsplit(Quarter, "-"), `[`, 1)),  # Extract year
+    quarter = as.numeric(gsub("Q", "", sapply(strsplit(Quarter, "-"), `[`, 2))),  # Extract quarter
+    relative_time = 4 * (year - 2012) + (quarter - 4)  # Calculate quarters relative to 2012-Q4
+  )
+
+```
+
+$$
+\text{sale_assessment} = \beta_0 + \beta_1 \text{Treated} + \sum \beta_t \text{as.factor(relative_time)} + \sum \beta_m \text{municipality_name} + \epsilon
+$$
+
+```{r}
+event_study_model <- lm(
+  sale_assessment ~ Treated * as.factor(relative_time) + municipality_name ,
+  data = nj_dt2
+)
+
+summary(event_study_model)
+```
+
+```{r}
+library(broom)
+
+event_coefficients <- tidy(event_study_model) %>% 
+  filter(grepl("Treated:as.factor", term)) %>%
+  mutate(
+    relative_time = as.numeric(gsub(".*as\\.factor\\(relative_time\\)([0-9-]+).*", "\\1", term)),  # Extract relative time
+    lower_ci = estimate - 1.96 * std.error,
+    upper_ci = estimate + 1.96 * std.error,
+    group = ifelse(grepl("Treated", term), "Treated", "Control")  # Add a group identifier
+  )
+```
+
+```{r}
+library(scales) 
+ggplot(event_coefficients, aes(x = relative_time, y = estimate, color = group, group = group)) +
+  geom_point(size = 2) + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +  # Zero effect line
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +  # Shock period
+  labs(
+    title = "Event Study: Impact of Shock on Sale Assessment",
+    x = "Relative Time (Quarters)",
+    y = "Estimated Effect on Sale Assessment"
+  ) + 
+  scale_color_manual(values = c("Treated" = "blue", "Control" = "red")) +  # Color differentiation
+  scale_y_continuous(labels = label_dollar()) + 
+  theme_minimal()
+```
+
+```{r}
+library(broom)
+library(dplyr)
+library(ggplot2)
+
+# Extract coefficients and compute confidence intervals for both treated and control groups
+event_coefficients2 <- tidy(event_study_model) %>%
+  mutate(
+    relative_time = as.numeric(gsub(".*as\\.factor\\(relative_time\\)([0-9-]+).*", "\\1", term)),  # Extract relative time
+    lower_ci = estimate - 1.96 * std.error,
+    upper_ci = estimate + 1.96 * std.error,
+    group = ifelse(grepl("Treated", term), "Treated", "Control")  # Add a group identifier for Treated/Control
+  )
+
+# Filter out terms for treated and control groups
+event_coefficients2 <- event_coefficients2 %>%
+  filter(grepl("Treated|relative_time", term)) # Captures both treated and relative time effects
+```
+
+```{r}
+ggplot(event_coefficients2, aes(x = relative_time, y = estimate, color = group, group = group)) +
+  geom_point(size = 2) + 
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +  # Zero effect line
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +  # Shock period
+  labs(
+    title = "Event Study: Impact of Shock on Sale Assessment",
+    x = "Relative Time (Quarters)",
+    y = "Estimated Effect on Sale Assessment (in Dollars)"
+  ) + 
+  scale_color_manual(values = c("Treated" = "blue", "Control" = "darkgreen")) +  # Color differentiation
+  scale_y_continuous(labels = label_dollar()) +  # Format y-axis in dollars
+  theme_minimal()
+```
+
+**Axes**:
+
+-   **X-axis** (Relative Time in Quarters): The time relative to the shock/event.
+
+    -   Negative values: Before the event.
+
+    -   Zero: Quarter of the event (red dashed line).
+
+    -   Positive values: After the event.
+
+-   **Y-axis** (Estimated Effect on Sale Assessment): The magnitude of the event's estimated effect on the house prices, with confidence intervals (vertical bars).
+
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Create the initial dataset
+data <- data.frame(
+  municipality_name = c("Andover Township", "Atlantic City", "Branchville Borough", "Byram Township", 
+                        "Corbin City", "Franklin Borough", "Fredon Township", "Green Township", 
+                        "Hamburg Borough", "Hopatcong Borough", "Linwood", "Longport Borough", 
+                        "Margate City", "Northfield", "Ogdensburg Borough", "Somers Point", 
+                        "Sparta Township", "Stanhope Borough", "Ventnor City"),
+  estimate = c(90753.9, -46217.3, 138110.8, 123956.5, -204014.5, 41477.3, 217040.1, 202097.0, 
+               28363.7, 121999.2, -119831.7, 381239.9, 112529.2, -142996.0, 103839.7, -211794.7, 
+               164088.1, 56779.2, NA),
+  std_error = c(51485.0, 19475.6, 58994.5, 50971.0, 42717.8, 52252.8, 53035.2, 52256.0, 
+                57658.6, 50375.0, 12225.6, 13801.7, 8554.2, 12074.1, 54074.9, 11381.0, 
+                50248.6, 51990.2, NA),
+  t_value = c(1.763, -2.373, 2.341, 2.432, -4.776, 0.794, 4.092, 3.867, 
+              0.492, 2.422, -9.802, 27.623, 13.155, -11.843, 1.920, -18.609, 
+              3.266, 1.092, NA),
+  p_value = c(0.077986, 0.017664, 0.019253, 0.015042, 1.82e-06, 0.427347, 4.31e-05, 0.000111, 
+              0.622786, 0.015466, 2e-16, 2e-16, 2e-16, 2e-16, 0.054857, 2e-16, 
+              0.001097, 0.274817, NA)
+)
+
+# Vector of municipalities in Atlantic County (Treated group)
+atlantic_county <- c("Atlantic City", "Linwood", "Longport Borough", "Margate City", 
+                     "Northfield", "Somers Point", "Ventnor City", "Corbin City")
+
+# Add a "Significance" column based on p-value
+data <- data %>%
+  mutate(Significant = ifelse(p_value < 0.05, TRUE, FALSE))
+
+# Filter only significant municipalities
+significant_data <- data %>%
+  filter(Significant == TRUE)
+
+# Divide into Treated and Control groups based on county
+significant_data <- significant_data %>%
+  mutate(Group = ifelse(municipality_name %in% atlantic_county, "Treated", "Control"))
+
+# Create the final table
+final_table <- significant_data %>%
+  dplyr::select(municipality_name, estimate, std_error, t_value, p_value, Group)
+
+
+# Print the final table
+print(final_table)
+```

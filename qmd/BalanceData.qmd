@@ -1,0 +1,48 @@
+---
+title: "Balance Tables"
+format: html
+editor: visual
+---
+
+```{r}
+library(reader)
+data <- read.csv("/Users/langleyburke/Downloads/BalanceData - Sheet1 (2).csv", header = TRUE, stringsAsFactors = FALSE)
+
+```
+
+```{r}
+# Check the structure of your data
+str(data)
+
+```
+
+```{r}
+# Remove commas and convert to numeric
+data$Population <- as.numeric(gsub(",", "", data$Population))
+data$Median_Household_Income <- as.numeric(gsub(",", "", data$Median_Household_Income))
+# Replace 0 with 0.485 in the Male column
+data$Male[data$Male == 0] <- 0.485
+
+```
+
+\\
+
+```{r}
+library(cobalt)
+balance_table <- bal.tab(x = data[, -1], treat = data$treatment)
+print(balance_table)
+
+
+```
+
+```{r}
+#install.packages("modelsummary")
+
+library(modelsummary)
+
+# Ensure the treatment variable is properly defined
+# Assume `treatment` is the column indicating treated (1) and control (0)
+datasummary_balance(formula = treatment ~ ., 
+                    data = data)
+
+```
